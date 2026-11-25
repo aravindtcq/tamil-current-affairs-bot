@@ -6,11 +6,12 @@ import json
 import hashlib
 from datetime import datetime
 from urllib.parse import quote
+from bs4 import BeautifulSoup
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 
-TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 HISTORY_FILE = "posted_news.json"
 
 CATEGORIES = [
@@ -43,25 +44,62 @@ def get_news(query):
     )
 
     feed = feedparser.parse(url)
-
     news = []
 
-    for item in feed.entries:
-        title = item.get("title", "").strip()
-        link = item.get("link", "")
+    for entry in feed.entries:
+        title = entry.get("title", "").strip()
+        link = entry.get("link", "")
 
         if title and link:
             news.append({
                 "title": title,
                 "link": link,
-                "published": item.get("published", "")
+                "published": entry.get("published", "")
             })
 
     return news
 
-def send_message(text):
+def get_image(article_url):
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        response = requests.get(
+            article_url,
+            headers=headers,
+            timeout=15
+        )
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Open Graph image
+        og = soup.find("meta", property="og:image")
+
+        if og and og.get("content"):
+            return og["content"]
+
+        # Twitter image
+        twitter = soup.find("meta", attrs={"name": "twitter:image"})
+
+        if twitter and twitter.get("content"):
+            return twitter["content"]
+
+        # First large image
+        for img in soup.find_all("img"):
+            src = img.get("src") or img.get("data-src")
+
+            if src and src.startswith("http"):
+                return src
+
+    except Exception as e:
+        print("Image extraction failed:", e)
+
+    return None
+
+def send_text(text):
     response = requests.post(
-        TELEGRAM_URL,
+        f"{API}/sendMessage",
         data={
             "chat_id": CHANNEL_ID,
             "text": text,
@@ -73,18 +111,28 @@ def send_message(text):
 
     response.raise_for_status()
 
-    result = response.json()
+def send_photo(image_url, caption):
+    try:
+        response = requests.post(
+            f"{API}/sendPhoto",
+            data={
+                "chat_id": CHANNEL_ID,
+                "photo": image_url,
+                "caption": caption,
+                "parse_mode": "HTML"
+            },
+            timeout=30
+        )
 
-    if not result.get("ok"):
-        raise Exception(f"Telegram API error: {result}")
+        response.raise_for_status()
 
-def create_exam_point(category, title):
-    return f"""
-🎯 <b>போட்டித் தேர்வு முக்கியத்துவம்:</b>
+        if response.json().get("ok"):
+            return True
 
-இந்த செய்தி நடப்பு நிகழ்வுகள் பகுதியில் முக்கியமானது.
-SBI, IBPS, RRB, TNPSC தேர்வுகளில் தொடர்புடைய கேள்விகள் வர வாய்ப்புள்ளது.
-"""
+    except Exception as e:
+        print("Photo sending failed:", e)
+
+    return False
 
 def post_current_affair():
 
@@ -94,12 +142,7 @@ def post_current_affair():
 
     news = get_news(query)
 
-    if not news:
-        print("News unavailable. Skipping.")
-        return
-
-    # Duplicate prevention
-    fresh_news = []
+    fresh = []
 
     for item in news:
         news_hash = hashlib.md5(
@@ -108,22 +151,22 @@ def post_current_affair():
 
         if news_hash not in history:
             item["hash"] = news_hash
-            fresh_news.append(item)
+            fresh.append(item)
 
-    if not fresh_news:
-        print("All available news already posted. Skipping.")
+    if not fresh:
+        print("No fresh news. Skipping.")
         return
 
-    item = random.choice(fresh_news)
+    item = random.choice(fresh)
 
     today = datetime.now().strftime("%d-%m-%Y")
 
-    message = f"""
+    caption = f"""
 <b>📰 தமிழ் நடப்பு நிகழ்வுகள்</b>
 
 {category}
 
-📅 <b>தேதி:</b> {today}
+📅 {today}
 
 ━━━━━━━━━━━━━━━━━━
 
@@ -133,15 +176,9 @@ def post_current_affair():
 
 ━━━━━━━━━━━━━━━━━━
 
-📝 <b>செய்தியின் முக்கியத்துவம்:</b>
+🎯 <b>போட்டித் தேர்வு முக்கியத்துவம்:</b>
 
-இந்த நிகழ்வு இந்தியா மற்றும் உலக அளவில் முக்கியத்துவம் வாய்ந்த நடப்பு நிகழ்வாகும்.
-
-இந்த செய்தியின் பின்னணி மற்றும் தொடர்புடைய தகவல்களை போட்டித் தேர்வுகளுக்கு தயாராகும் மாணவர்கள் தெரிந்து வைத்திருக்க வேண்டும்.
-
-━━━━━━━━━━━━━━━━━━
-
-🎯 <b>தேர்வுக்கு முக்கியம்:</b>
+இந்த செய்தி நடப்பு நிகழ்வுகள் பகுதியில் முக்கியமானது.
 
 SBI • IBPS • RRB • TNPSC
 
@@ -150,15 +187,23 @@ SBI • IBPS • RRB • TNPSC
 🔗 <a href="{item['link']}">முழு செய்தியைப் படிக்க</a>
 
 #TamilCurrentAffairs #CurrentAffairs
-#SBI #RRB #IBPS #TNPSC #ExamPreparation
+#SBI #RRB #IBPS #TNPSC
 """
 
-    send_message(message)
+    image_url = get_image(item["link"])
+
+    posted = False
+
+    if image_url:
+        posted = send_photo(image_url, caption)
+
+    if not posted:
+        send_text(caption)
 
     history.append(item["hash"])
     save_history(history)
 
-    print("News posted successfully!")
+    print("Posted successfully!")
 
 if __name__ == "__main__":
     post_current_affair()
