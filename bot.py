@@ -1,7 +1,7 @@
 import os
-import sys
 import requests
 import feedparser
+import random
 from datetime import datetime
 from urllib.parse import quote
 
@@ -10,29 +10,18 @@ CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-CATEGORIES = {
-    "morning": [
-        "இந்தியா முக்கிய செய்திகள்",
-        "Tamil Nadu latest news",
-        "India current affairs"
-    ],
-    "national": [
-        "India national news",
-        "Government of India schemes",
-        "India current affairs"
-    ],
-    "banking": [
-        "RBI banking news India",
-        "Indian economy",
-        "Banking current affairs"
-    ],
-    "international": [
-        "World news current affairs",
-        "International current affairs"
-    ]
-}
+CATEGORIES = [
+    ("🇮🇳 இந்திய செய்திகள்", "India latest news"),
+    ("🏦 வங்கி & பொருளாதாரம்", "India banking economy RBI news"),
+    ("🌍 சர்வதேச செய்திகள்", "international world news"),
+    ("🔬 அறிவியல் & தொழில்நுட்பம்", "science technology news"),
+    ("🏛️ அரசு திட்டங்கள்", "India government schemes"),
+    ("🏅 விளையாட்டு செய்திகள்", "India sports news"),
+    ("📚 கல்வி & தேர்வுகள்", "India education competitive exams"),
+    ("💰 நிதி & வணிகம்", "India finance business news"),
+]
 
-def get_news(query, limit=5):
+def get_news(query):
     url = (
         "https://news.google.com/rss/search?q="
         + quote(query)
@@ -40,17 +29,15 @@ def get_news(query, limit=5):
     )
 
     feed = feedparser.parse(url)
+
     news = []
 
-    for entry in feed.entries[:limit]:
-        title = entry.get("title", "")
-        link = entry.get("link", "")
-
-        if title:
-            news.append({
-                "title": title,
-                "link": link
-            })
+    for item in feed.entries[:10]:
+        news.append({
+            "title": item.get("title", ""),
+            "link": item.get("link", ""),
+            "published": item.get("published", "")
+        })
 
     return news
 
@@ -69,116 +56,55 @@ def send_message(text):
 
     response.raise_for_status()
 
-    result = response.json()
-
-    if not result.get("ok"):
-        raise Exception(result)
-
-    print("Telegram message sent successfully!")
+    if not response.json().get("ok"):
+        raise Exception("Telegram posting failed")
 
 
-def create_news_post(category):
-    queries = CATEGORIES.get(category, [])
+def post_current_affair():
 
-    news = []
-    seen = set()
+    category, query = random.choice(CATEGORIES)
 
-    for query in queries:
-        items = get_news(query, 5)
-
-        for item in items:
-            if item["title"] not in seen:
-                seen.add(item["title"])
-                news.append(item)
-
-    news = news[:8]
-
-    today = datetime.now().strftime("%d-%m-%Y")
-
-    if category == "morning":
-        heading = "🌅 காலை முக்கிய செய்திகள்"
-    elif category == "national":
-        heading = "🇮🇳 தேசிய நடப்பு நிகழ்வுகள்"
-    elif category == "banking":
-        heading = "🏦 வங்கி & பொருளாதார செய்திகள்"
-    elif category == "international":
-        heading = "🌍 சர்வதேச செய்திகள்"
-    else:
-        heading = "📰 நடப்பு செய்திகள்"
-
-    message = f"<b>{heading}</b>\n"
-    message += f"📅 {today}\n\n"
+    news = get_news(query)
 
     if not news:
-        message += "இன்று செய்திகள் பெற முடியவில்லை. பின்னர் முயற்சிக்கவும்."
-    else:
-        for i, item in enumerate(news, 1):
-            message += f"{i}. {item['title']}\n"
-            message += f"🔗 <a href='{item['link']}'>செய்தியை படிக்க</a>\n\n"
+        print("No news found. Skipping post.")
+        return
 
-    message += "\n#TamilCurrentAffairs #CurrentAffairs #CompetitiveExams"
+    item = random.choice(news)
 
-    send_message(message)
-
-
-def create_quiz():
     today = datetime.now().strftime("%d-%m-%Y")
 
-    quiz = [
-        {
-            "question": "இந்தியாவின் மத்திய வங்கி எது?",
-            "options": [
-                "A) SBI",
-                "B) RBI",
-                "C) NABARD",
-                "D) SEBI"
-            ],
-            "answer": "B) RBI",
-            "explanation": "இந்தியாவின் மத்திய வங்கி Reserve Bank of India."
-        },
-        {
-            "question": "இந்தியாவில் நாணயங்களை வெளியிடும் அதிகாரம் யாருக்கு உள்ளது?",
-            "options": [
-                "A) SBI",
-                "B) Finance Ministry",
-                "C) RBI",
-                "D) SEBI"
-            ],
-            "answer": "B) Finance Ministry",
-            "explanation": "இந்திய நாணயங்களை இந்திய அரசின் நிதி அமைச்சகம் வெளியிடுகிறது."
-        },
-        {
-            "question": "இந்தியாவின் பங்குச் சந்தை ஒழுங்குமுறை அமைப்பு எது?",
-            "options": [
-                "A) RBI",
-                "B) SEBI",
-                "C) NABARD",
-                "D) IRDAI"
-            ],
-            "answer": "B) SEBI",
-            "explanation": "SEBI இந்திய பங்குச் சந்தையை ஒழுங்குபடுத்துகிறது."
-        }
-    ]
+    message = f"""
+<b>📰 தமிழ் நடப்பு நிகழ்வுகள்</b>
 
-    day = datetime.now().day
-    q = quiz[day % len(quiz)]
+{category}
 
-    message = f"<b>📝 தினசரி தேர்வு வினா</b>\n"
-    message += f"📅 {today}\n\n"
-    message += f"<b>{q['question']}</b>\n\n"
+📅 {today}
 
-    for option in q["options"]:
-        message += option + "\n"
+━━━━━━━━━━━━━━━━━━
 
-    message += "\n#DailyMCQ #SBI #RRB #CompetitiveExams"
+<b>📌 முக்கிய செய்தி:</b>
+
+{item['title']}
+
+━━━━━━━━━━━━━━━━━━
+
+🎯 <b>போட்டித் தேர்வுகளுக்கு முக்கியமானது</b>
+
+இந்த செய்தி SBI, IBPS, RRB, TNPSC மற்றும் பிற போட்டித் தேர்வுகளுக்கான நடப்பு நிகழ்வுகள் பகுதியில் முக்கியத்துவம் வாய்ந்தது.
+
+🔗 <a href="{item['link']}">முழு செய்தியைப் படிக்க</a>
+
+━━━━━━━━━━━━━━━━━━
+
+#CurrentAffairs #TamilCurrentAffairs
+#SBI #RRB #IBPS #TNPSC #CompetitiveExams
+"""
 
     send_message(message)
+
+    print("News successfully posted!")
 
 
 if __name__ == "__main__":
-    category = sys.argv[1] if len(sys.argv) > 1 else "morning"
-
-    if category == "quiz":
-        create_quiz()
-    else:
-        create_news_post(category)
+    post_current_affair()
